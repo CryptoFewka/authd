@@ -45,9 +45,14 @@ func New() Provider {
 }
 
 // AdditionalScopes returns the scopes required by the Google provider.
-// The admin.directory.group.readonly scope allows the broker to fetch Google
-// Workspace group memberships for the authenticated user, provided that the
-// OAuth app has been pre-authorized in Google Admin Console.
+//
+// Requesting admin.directory.group.readonly causes it to appear in every
+// authenticated user's access token, provided the Google Workspace admin has
+// authorized the OAuth client ID for this scope via "Manage domain-wide
+// delegation" in Google Admin Console. The broker then uses the user's own
+// access token to call the Google Admin SDK Directory API — no separate
+// service-account credentials are required. This is the same mechanism used
+// by Cloudflare Zero Trust for Google Workspace group lookups.
 //
 // Note that we do not return oidc.ScopeOfflineAccess, as for TV/limited input
 // devices, the API call will fail as not supported by this application type.
@@ -60,12 +65,20 @@ func (Provider) AdditionalScopes() []string {
 }
 
 // GetGroups retrieves the Google Workspace groups for the authenticated user
-// using the user's own access token. This requires that:
-//   - The OAuth app has been authorized in Google Admin Console with the
-//     admin.directory.group.readonly scope ("domain-wide authorization").
-//   - The Admin SDK API is enabled in Google Cloud Console.
-//   - "Trust internal apps" is enabled in Google Admin Console (Security >
-//     Access and data control > API controls > Settings).
+// using the user's own access token.
+//
+// The token carries the admin.directory.group.readonly scope because the
+// admin authorized the OAuth client ID for that scope in Google Admin Console
+// (Security > Access and data control > API controls > Manage domain-wide
+// delegation). This grants the scope to every user in the domain who
+// authenticates through this OAuth client, without requiring a service account.
+//
+// Prerequisites (one-time admin setup):
+//   - Admin SDK API enabled in Google Cloud Console
+//   - OAuth app type set to "Internal" in Google Cloud Console
+//   - "Trust internal apps" enabled in Google Admin Console
+//   - OAuth client ID authorized for admin.directory.group.readonly in
+//     Manage domain-wide delegation in Google Admin Console
 //
 // The optional "directory_api_url" key in providerMetadata overrides the
 // default API base URL, which is useful for testing.
@@ -216,9 +229,10 @@ func doDirectoryRequest(ctx context.Context, accessToken, apiURL string) (*direc
 	if resp.StatusCode != http.StatusOK {
 		msg := fmt.Sprintf(
 			"Error: failed to fetch Google Workspace groups (HTTP %d). "+
-				"Ensure the Admin SDK is enabled, the OAuth app has been pre-authorized "+
-				"in Google Admin Console with the %q scope, and "+
-				"'Trust internal apps' is enabled in Security > API controls.",
+				"Ensure the Admin SDK is enabled in Google Cloud Console, the OAuth "+
+				"client ID is authorized for the %q scope via "+
+				"'Manage domain-wide delegation' in Google Admin Console, and "+
+				"'Trust internal apps' is enabled under Security > API controls.",
 			resp.StatusCode, directoryGroupScope,
 		)
 		return nil, &providerErrors.ForDisplayError{
