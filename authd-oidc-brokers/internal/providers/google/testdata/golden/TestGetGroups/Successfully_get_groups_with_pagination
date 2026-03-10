@@ -1,0 +1,6 @@
+- name: group1
+  ugid: id1
+- name: group2
+  ugid: id2
+- name: group3
+  ugid: id3
